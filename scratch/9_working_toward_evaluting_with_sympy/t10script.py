@@ -85,6 +85,7 @@ def make_whole_equation(possible_operations = 3, min_operations = 1):
     if type(equation)==int or  equation.has(x)== False:
         print(f"catching function with nothing {equation} within make_whole_equation")
         equation = x
+    print(f"Equation is {equation}")
     return equation
 
 def get_y_values(equation, x_numeric):
@@ -145,71 +146,71 @@ def get_next_idx(folder):
     new_idx = max(idxs)+1
     return new_idx
 
+@dataclass_json
+@dataclass
+class Config:
+    clip_value:int = 30 #clip eerything to be in the range 
+    num_points_to_model:int = 50
+    num_equations:int = 5
+    folder:str = 'results'
 
-# clip eerything to be in the range of -nn to nn
-nn = 30
-num_points_to_model = 50
-num_equations = 5
-folder = 'results'
+def run_loop(config ):
+    folder = Path(config.folder)
+    folder.mkdir(exist_ok=True)
+    x_numeric = np.linspace(-1,1, config.num_points_to_model)
+    for i in range(config.num_equations):
+        equation = make_whole_equation()
+        y = get_y_values(equation, x_numeric)
+        dydx_values = get_dydx_values(equation, x_numeric)
+        d2yd2x_values = get_d2yd2x_values(equation, x_numeric)
 
-
-folder = Path(folder)
-folder.mkdir(exist_ok=True)
-x_numeric = np.linspace(-1,1, num_points_to_model)
-for i in range(num_equations):
-    equation = make_whole_equation()
-    y = get_y_values(equation, x_numeric)
-    dydx_values = get_dydx_values(equation, x_numeric)
-    d2yd2x_values = get_d2yd2x_values(equation, x_numeric)
-
-
-    # make a torch version of the symbolically found dydx  
-    my_tensors  = [ dydx_values,d2yd2x_values, y]
-    dydx_values_true_t,d2yd2x_values_true_t, y = \
-         [torch.clamp(torch.Tensor(v),-nn,nn) for v in my_tensors]
-
-
-    xb, yb = [make_batch(torch.tensor(np.nan_to_num(z))).to(torch.float32) for z in [x_numeric,y]]
-    yb_normalizer = Normalizer(yb)
-    yb_norm = yb_normalizer.norm(yb)
+        # make a torch version of the symbolically found dydx  
+        my_tensors  = [ dydx_values,d2yd2x_values, y]
+        dydx_values_true_t,d2yd2x_values_true_t, y = \
+            [torch.clamp(torch.Tensor(v),-config.clip_value,config.clip_value) for v in my_tensors]
 
 
-    # ## Train the MLP
-    # * a learning rate higher than 1e-2 is generally unstable. 
-    mlp = make_mlp(n = 100, layers_count=3, act = Mish)
-    do_step2 = Stepper_v2(mlp, xb, yb_norm)
-    do_step2.do_epochs(int(1e4), lr = 1e-4)
-    yprime = mlp(xb)
+        xb, yb = [make_batch(torch.tensor(np.nan_to_num(z))).to(torch.float32) for z in [x_numeric,y]]
+        yb_normalizer = Normalizer(yb)
+        yb_norm = yb_normalizer.norm(yb)
 
-    yprime_debatch = yb_normalizer.denorm(   debatch(yprime))
-    # x_debatch = debatch(x)
+        # ## Train the MLP
+        # * a learning rate higher than 1e-2 is generally unstable. 
+        mlp = make_mlp(n = 100, layers_count=3, act = Mish)
+        do_step2 = Stepper_v2(mlp, xb, yb_norm)
+        do_step2.do_epochs(int(1e4), lr = 1e-4)
+        yprime = mlp(xb)
 
-    xb.requires_grad = True
-    yprime_pre = mlp(xb)
-    yprime_pre.retain_grad()
-    # yprime_pre.requires_grad = True
-    yprime = yb_normalizer.denorm(   yprime_pre)
+        yprime_debatch = yb_normalizer.denorm(   debatch(yprime))
 
-    dydx = torch.autograd.grad(yprime.sum(), xb, create_graph=True)[0]
-    d2yd2x = torch.autograd.grad(dydx.sum(), xb, create_graph=True)[0]
+        xb.requires_grad = True
+        yprime_pre = mlp(xb)
+        yprime_pre.retain_grad()
+        # yprime_pre.requires_grad = True
+        yprime = yb_normalizer.denorm(   yprime_pre)
 
-    dydx, d2yd2x = [debatch(v) for v in [dydx, d2yd2x ]]
-    my_tensors  = [dydx, d2yd2x]
-    dydx, d2yd2x= [torch.clamp(v,-nn,nn) for v in my_tensors]
+        dydx = torch.autograd.grad(yprime.sum(), xb, create_graph=True)[0]
+        d2yd2x = torch.autograd.grad(dydx.sum(), xb, create_graph=True)[0]
 
-    dydx_error = F.mse_loss(dydx_values_true_t,debatch(dydx))
-    d2yd2x_error = F.mse_loss(d2yd2x_values_true_t, d2yd2x)
+        dydx, d2yd2x = [debatch(v) for v in [dydx, d2yd2x ]]
+        my_tensors  = [dydx, d2yd2x]
+        dydx, d2yd2x= [torch.clamp(v,-config.clip_value,config.clip_value) for v in my_tensors]
 
-    r = Results(do_step2.loss_list[-1].item(), dydx_error.item(), d2yd2x_error.item(), str(equation))
-    j = r.to_json()
-    new_idx = get_next_idx(folder)
-    fname = make_file_name(new_idx,folder)
-    with open(fname, 'w') as f:
-        f.write(j)
-    print(f"Finished {i} with equation {equation}")
+        dydx_error = F.mse_loss(dydx_values_true_t,debatch(dydx))
+        d2yd2x_error = F.mse_loss(d2yd2x_values_true_t, d2yd2x)
+
+        r = Results(do_step2.loss_list[-1].item(), dydx_error.item(), d2yd2x_error.item(), str(equation))
+        j = r.to_json()
+        new_idx = get_next_idx(folder)
+        fname = make_file_name(new_idx,folder)
+        with open(fname, 'w') as f:
+            f.write(j)
+        print(f"Finished {i}. Save name {fname} with equation {equation}")
     
 
 
-
+if __name__ == "__main__":
+    c = Config()
+    run_loop(c)
 
 
