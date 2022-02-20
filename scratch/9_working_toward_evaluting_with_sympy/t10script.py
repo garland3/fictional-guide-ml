@@ -28,7 +28,7 @@ from pathlib import Path
 
 do_step = Stepper()
 
-x = symbols("x")
+# x = symbols("x")
 
 def add(x1,x2): return x1-x2
 def minus(x1, x2): return x1-x2
@@ -42,7 +42,8 @@ fns2 = [add, minus, power]
 
 
 
-def make_equation(number_of_num_fncs):
+def make_equation(number_of_num_fncs, x):
+    """pass the x that you want the equation to be a function of"""
     y  = 1
     for i in range(number_of_num_fncs):
         if random.randint(0,1)==0:
@@ -75,20 +76,22 @@ def make_equation(number_of_num_fncs):
 
 
 
-def make_whole_equation(possible_operations = 3, min_operations = 1):
+def make_whole_equation(x, possible_operations = 3, min_operations = 1):
+    """Pass the x that you want the equation to be a function of"""
     number_of_num_fncs_numerator = random.randint(min_operations,possible_operations)
     number_of_num_fncs_denominator = random.randint(min_operations,possible_operations)
 #     print(number_of_num_fncs_numerator,number_of_num_fncs_denominator )
-    numerator = make_equation(number_of_num_fncs_numerator)
-    denominator = make_equation(number_of_num_fncs_numerator)
+    numerator = make_equation(number_of_num_fncs_numerator,x)
+    denominator = make_equation(number_of_num_fncs_numerator,x)
     equation = numerator/denominator
     if type(equation)==int or  equation.has(x)== False:
         print(f"catching function with nothing {equation} within make_whole_equation")
+        x = symbols("x")
         equation = x
     print(f"Equation is {equation}")
     return equation
 
-def get_y_values(equation, x_numeric):
+def get_y_values(equation, x_numeric,x):
     """get the y values evalued at x_numeric"""
     f = lambdify(x, equation, "numpy")
 
@@ -99,7 +102,8 @@ def get_y_values(equation, x_numeric):
 
     return y
 
-def get_dydx_values(equation, x_numeric):
+def get_dydx_values(equation, x_numeric, x):
+    """find d-equation/dx"""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
     #     dydx = simplify( diff(equation, x))
@@ -112,11 +116,16 @@ def get_dydx_values(equation, x_numeric):
         dydx_values = np.nan_to_num(dydx_values)
     return dydx_values
 
-def get_d2yd2x_values(equation, x_numeric):
+def get_d2yd2x_values(equation, x_numeric,x):
+    """find d2equationd2x"""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         dydx =  diff(equation, x)
+        
         d2yd2x =  diff(dydx, x)
+        if d2yd2x==0:
+            print("Zero case for 2nd derrivative")
+            return np.zeros(x_numeric.shape)
         f_d2yd2x = lambdify(x, d2yd2x, "numpy")
         d2yd2x_values = f_d2yd2x(x_numeric)
         d2yd2x_values = np.nan_to_num(d2yd2x_values)
@@ -159,10 +168,11 @@ def run_loop(config ):
     folder.mkdir(exist_ok=True)
     x_numeric = np.linspace(-1,1, config.num_points_to_model)
     for i in range(config.num_equations):
-        equation = make_whole_equation()
-        y = get_y_values(equation, x_numeric)
-        dydx_values = get_dydx_values(equation, x_numeric)
-        d2yd2x_values = get_d2yd2x_values(equation, x_numeric)
+        x = symbols("x")
+        equation = make_whole_equation(x)
+        y = get_y_values(equation, x_numeric,x)
+        dydx_values = get_dydx_values(equation, x_numeric,x)
+        d2yd2x_values = get_d2yd2x_values(equation, x_numeric,x)
 
         # make a torch version of the symbolically found dydx  
         my_tensors  = [ dydx_values,d2yd2x_values, y]
