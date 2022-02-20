@@ -5,6 +5,8 @@
 profile_default/
 ipython_config.py
 
+# python
+__pycache__
 
 
 results
